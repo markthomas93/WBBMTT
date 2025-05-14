@@ -1,4 +1,3 @@
-
 /**
  * Web Browser Based Multi-Touch Test (Refactored using Pointer Events API)
  *
@@ -8,7 +7,7 @@
 
 // using WebModule pattern:
 // https://github.com/uupaa/WebModule
-// http://qiita.com/kaiinui/items/22a75d2adc56a40da7b7
+// http://qiita.com/kaiinui/items/22a75d0adc56a40da7b7
 (function(global) {
     "use strict;"
 
@@ -89,7 +88,7 @@
             element = document.createElement("div");
             document.body.insertBefore(element, document.body.firstChild);
             element.id = this.elementId;
-            element.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100px; background-color: rgba(255, 255, 255, 0.8); overflow-y: scroll; z-index: 1000;";
+            element.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 150px; background-color: rgba(255, 255, 255, 0.8); overflow-y: scroll; z-index: 1000; font-size: 12px; font-family: monospace;"; // Added style for size and font
         }
         element.insertAdjacentHTML("beforeend", s);
         // Auto-scroll to bottom
@@ -128,17 +127,32 @@
         } else {
             this._consoleObjOrig = undefined;
             this._consoleLogOrig = undefined;
+            // Create a dummy console if it doesn't exist to prevent errors
+             global.console = { log: function() {}, warn: function() {}, error: function() {} };
         }
 
         var self = this;
         console.log = function(s) {
             self.log(s);
         };
+        // Also override warn and error for completeness
+         if (this._consoleObjOrig && this._consoleObjOrig.warn) {
+             console.warn = function(s) { self.log("WARN: " + s); };
+         } else {
+             console.warn = function(s) { self.log("WARN: " + s); };
+         }
+         if (this._consoleObjOrig && this._consoleObjOrig.error) {
+             console.error = function(s) { self.log("ERROR: " + s); };
+         } else {
+             console.error = function(s) { self.log("ERROR: " + s); };
+         }
     }
 
     function Divlog_stop() {
         if (this._consoleObjOrig && this._consoleLogOrig) {
             console.log = this._consoleLogOrig;
+            if (this._consoleObjOrig.warn) console.warn = this._consoleObjOrig.warn;
+            if (this._consoleObjOrig.error) console.error = this._consoleObjOrig.error;
         }
     }
 
@@ -178,6 +192,7 @@
         this.showTouchProperties = !queryValueCheckbox(this.query, "hideTouchProperties", false);
         this.showTouchRadius = queryValueCheckbox(this.query, "showTouchRadius", false);
         this.showPointerType = queryValueCheckbox(this.query, "showPointerType", false); // New option
+        this.logPointerEvents = queryValueCheckbox(this.query, "logPointerEvents", true); // New option to control logging
 
         this.idleMessage = "Touch Screen Tester (WBBMTT)";
         this.displayCanvasId = "touchDisplayCanvas";
@@ -191,6 +206,9 @@
         // Log maxTouchPoints for debugging
         if (IN_BROWSER && navigator.maxTouchPoints !== undefined) {
              console.log("Browser maxTouchPoints:", navigator.maxTouchPoints);
+             this._maxTouchPoints = navigator.maxTouchPoints; // Store for logging
+        } else {
+             this._maxTouchPoints = "N/A"; // Handle cases where maxTouchPoints is not available
         }
     };
 
@@ -228,9 +246,14 @@
     }
 
     function queryValueCheckbox(obj, key, defaultVal) {
-         // Check if key exists and its value is not explicitly "false" or "0"
-        return (key in obj && obj[key] !== "false" && obj[key] !== "0") || defaultVal;
+         // Check if key exists and its value is not explicitly "false" or "0" (case-insensitive)
+        if (key in obj) {
+            const value = String(obj[key]).toLowerCase();
+            return !(value === "false" || value === "0");
+        }
+        return defaultVal;
     }
+
 
     function queryValue(obj, key, defaultVal) {
         return (key in obj && obj[key] !== undefined && obj[key] !== null) ? obj[key] : defaultVal;
@@ -246,6 +269,8 @@
             pageY: pointerEvent.pageY,
             screenX: pointerEvent.screenX,
             screenY: pointerEvent.screenY,
+            clientX: pointerEvent.clientX, // Add clientX/Y
+            clientY: pointerEvent.clientY,
             pointerType: pointerEvent.pointerType // Store pointer type
         });
     }
@@ -268,9 +293,9 @@
     }
 
     function numberToPadedFixed(number, width, precision) {
-        if (number === undefined) return " N/A".padStart(width + precision + 1);
+        if (number === undefined || number === null) return " N/A".padStart(width + precision + 1);
         var s = number.toFixed(precision);
-        while (s.length < width + precision + 1) { // Adjust padding based on precision
+        while (s.length < width + (precision > 0 ? precision + 1 : 0)) { // Adjust padding based on precision
             s = " " + s;
         }
         return s;
@@ -312,7 +337,7 @@
         ctx.stroke();
     }
 
-    function Wbbmtt__drawTouchPoint(ctx, pointerInfo, color) {
+    function Wbbmtt__drawTouchPoint(ctx, pointerInfo, color, ordinal) {
         var px = pointerInfo.pageX;
         var py = pointerInfo.pageY;
 
@@ -338,21 +363,16 @@
         ctx.strokeStyle = 'rgb(0,0,0)'; // Black stroke for inner circle
         ctx.stroke();
 
-         // Draw pointerId or ordinal inside the circle
-         ctx.font = "bold 12px Arial";
+         // Draw ordinal inside the circle
+         ctx.font = "bold " + (this.markRadius2 * 0.8) + "px Arial"; // Scale font with mark size
          ctx.fillStyle = 'black'; // Black text
          ctx.textAlign = 'center';
          ctx.textBaseline = 'middle';
-         // Display the index (0-based) within the circle
-         let ordinal = 0;
-         for (const id of this._activePointers.keys()) {
-             if (id === pointerInfo.identifier) break;
-             ordinal++;
-         }
+         // Display the ordinal + 1 (1-based index)
          ctx.fillText(ordinal + 1, px, py);
     }
 
-    // Updated drawTouchString to use pointerInfo
+    // Updated drawTouchString to use pointerInfo and ordinal
     function drawTouchString(ctx, pointerInfo, color, ordinal, showRadius, showPointerType) {
         ctx.font = "16px monospace";
         ctx.fillStyle = color;
@@ -411,18 +431,19 @@
         let i = 0;
         // Iterate over the values (pointer info objects) in the Map
         for (const pointerInfo of this._activePointers.values()) {
-             this._drawTouchPoint(ctx, pointerInfo, touchColor(i));
+             // Pass the current index 'i' as the ordinal
+             this._drawTouchPoint(ctx, pointerInfo, touchColor(i), i);
              i++;
         }
 
-        let entryExists = false;
+        let entryExists = this._activePointers.size > 0;
         i = 0;
         // Iterate over the values (pointer info objects) in the Map again for text
         for (const pointerInfo of this._activePointers.values()) {
             if (this.showTouchProperties) {
+                 // Pass the current index 'i' as the ordinal
                  drawTouchString(ctx, pointerInfo, touchColor(i), i, this.showTouchRadius, this.showPointerType);
             }
-            entryExists = true;
             i++;
         }
 
@@ -437,51 +458,95 @@
         // Based on the refactoring goal, we primarily care about 'touch'.
         // The original code was only for touch events, so we'll continue that focus
         // unless query parameters suggest otherwise (not implemented yet).
-        if (event.pointerType !== 'touch') {
-            // Optionally log or handle other pointer types if needed
-            // console.log("Ignoring pointerType:", event.pointerType);
+        // If we want to handle mouse/pen for debug, remove this filter or make it conditional.
+        if (event.pointerType !== 'touch' && event.pointerType !== 'mouse' && event.pointerType !== 'pen') {
+             if (this.logPointerEvents) {
+                  console.log("Ignoring pointerType:", event.pointerType, "for event type:", event.type, "ID:", event.pointerId);
+             }
             return;
         }
 
         this.currentEvent = event; // for extensibility
 
-        // With touch-action: none set on the canvas, default gestures are prevented.
+        // With touch-action: none set on the canvas, default gestures are prevented. [5, 8, 18]
         // We might still need preventDefault for other reasons depending on interaction.
         // For now, let's keep it if the query param is set, although touch-action is primary.
         if (this.preventDefaultNonPointer) {
              // event.preventDefault(); // touch-action handles this for gestures originating on the element
         }
 
+        let logMessage = "";
+        const currentPointerInfo = { // Capture relevant info for logging
+             id: event.pointerId,
+             type: event.pointerType,
+             x: event.pageX,
+             y: event.pageY,
+             btn: event.button, // Include button for mouse events
+             btns: event.buttons // Include buttons state
+        };
+
 
         switch (event.type) {
             case "pointerdown":
                 // Add the new pointer to the map
                 storePointer(this._activePointers, event);
+                if (this.logPointerEvents) {
+                    logMessage = `Pointer DOWN. ID: ${currentPointerInfo.id}, Type: ${currentPointerInfo.type}, Pos: (${currentPointerInfo.x.toFixed(2)}, ${currentPointerInfo.y.toFixed(2)}), Active: ${this._activePointers.size}/${this._maxTouchPoints}`;
+                     console.log(logMessage);
+                }
                 break;
             case "pointermove":
                 // Update the position of the existing pointer in the map
                 if (this._activePointers.has(event.pointerId)) {
                     storePointer(this._activePointers, event); // Overwrite with updated info
+                     // Log move events, but perhaps less verbosely than down/up/cancel
+                    // Consider debouncing move event logging if it's too noisy
+                     if (this.logPointerEvents) {
+                         // Debounce logging for move events for better performance
+                         if (!this._logMoveDebounced) {
+                             this._logMoveDebounced = debounce( (info) => {
+                                  console.log(`Pointer MOVE. ID: ${info.id}, Type: ${info.type}, Pos: (${info.x.toFixed(2)}, ${info.y.toFixed(2)}), Active: ${this._activePointers.size}/${this._maxTouchPoints}`);
+                             }, 50); // Log move events at most every 50ms
+                         }
+                         this._logMoveDebounced(currentPointerInfo);
+                     }
+                } else {
+                     // This can happen if pointerdown was missed for some reason
+                      if (this.logPointerEvents) {
+                           console.warn(`Pointer MOVE for unknown ID: ${currentPointerInfo.id}, Type: ${currentPointerInfo.type}. Ignoring.`);
+                      }
                 }
                 break;
             case "pointerup": // fall through
             case "pointercancel":
                  // Remove the pointer from the map
                  if (this._activePointers.has(event.pointerId)) {
+                     if (this.logPointerEvents) {
+                          logMessage = `Pointer ${event.type.toUpperCase()}. ID: ${currentPointerInfo.id}, Type: ${currentPointerInfo.type}, Pos: (${currentPointerInfo.x.toFixed(2)}, ${currentPointerInfo.y.toFixed(2)}), Active (before): ${this._activePointers.size}/${this._maxTouchPoints}`;
+                          console.log(logMessage);
+                     }
                      if (this.manualClearMode) {
-                         // In manual clear mode, don't remove immediately, just mark or handle differently if needed.
-                         // For simplicity in this refactor, manualClearMode affects the shake handler primarily.
-                         // If manualClearMode should prevent clearing on pointerup/cancel, we'd add logic here.
-                         // For now, clearing happens via shake.
-                          this._activePointers.delete(event.pointerId); // Still remove on up/cancel for accuracy unless specific manual clear logic is added.
+                         // In manual clear mode, clearing happens only via shake.
+                         // However, to prevent stale pointers on screen, we should still remove them on up/cancel.
+                         // The 'manualClearMode' primarily impacts the shake handler's behavior.
+                         this._activePointers.delete(event.pointerId); // Still remove on up/cancel for accuracy
                      } else {
                           this._activePointers.delete(event.pointerId);
                      }
+                      if (this.logPointerEvents) {
+                           console.log(`Active pointers (after ${event.type}): ${this._activePointers.size}/${this._maxTouchPoints}`);
+                      }
+                 } else {
+                      if (this.logPointerEvents) {
+                           console.warn(`Pointer ${event.type.toUpperCase()} for unknown ID: ${currentPointerInfo.id}, Type: ${currentPointerInfo.type}. Ignoring.`);
+                      }
                  }
                 break;
             default :
                 // Should not happen for the event types we are listening to
-                console.warn("Unknown pointer event type:", event.type);
+                if (this.logPointerEvents) {
+                     console.warn("Unknown pointer event type:", event.type, "ID:", event.pointerId);
+                }
                 break;
         }
 
@@ -495,57 +560,68 @@
     // for debug
     // Adapt click handler for PC_DEBUG to simulate pointer events if needed,
     // or keep as is if it simulates touch events for testing.
-    // Keeping the original simulation of touch events for now.
-    function TouchEventSym(type) {
+    // Keeping the original simulation of touch events for now, but adapting it to call the pointer handler.
+    function TouchEventSym(type, eventData) {
         this.preventDefault = function() {}; // Provide a dummy preventDefault
         this.type = type;
-         this.changedTouches = []; // Simulate changedTouches property
-         this.touches = []; // Simulate touches property
+        // Simulate PointerEvent properties
+         this.pointerId = eventData.identifier !== undefined ? eventData.identifier : Date.now() + Math.random(); // Ensure unique ID
+         this.pageX = eventData.pageX;
+         this.pageY = eventData.pageY;
+         this.screenX = eventData.screenX;
+         this.screenY = eventData.screenY;
+         this.clientX = eventData.clientX !== undefined ? eventData.clientX : eventData.pageX;
+         this.clientY = eventData.clientY !== undefined ? eventData.clientY : eventData.pageY;
+         this.width = eventData.radiusX !== undefined ? eventData.radiusX * 2 : undefined;
+         this.height = eventData.radiusY !== undefined ? eventData.radiusY * 2 : undefined;
+         this.pointerType = eventData.pointerType !== undefined ? eventData.pointerType : "mouse"; // Default simulated type
+         this.button = eventData.button !== undefined ? eventData.button : 0;
+         this.buttons = eventData.buttons !== undefined ? eventData.buttons : (this.button === 0 ? 1 : 0); // Simulate buttons state
     }
+
 
     function Wbbmtt__clickHandler(orgThis, event) {
          if (!PC_DEBUG) return; // Only active in debug mode
 
-        // Simulate a touchstart event with one pointer
-        var touch = {
-            "identifier" : Date.now(), // Use a unique identifier
+        console.log("Simulating pointerdown from click:", event);
+
+        // Simulate a pointerdown event from a click
+        var pointerEventData = {
+            "identifier" : Date.now() + Math.random(), // Unique ID for simulation
             "pageX" : event.pageX,
             "pageY" : event.pageY,
             "screenX" : event.screenX,
             "screenY" : event.screenY,
-            "radiusX": 10, // Simulate some radius data
-            "radiusY": 10,
-             "pointerType": "mouse" // Indicate simulated mouse input
+            "clientX" : event.clientX,
+            "clientY" : event.clientY,
+            "pointerType": "mouse", // Simulate as mouse
+            "button": 0, // Left button
+            "buttons": 1 // Left button pressed
         };
 
-         // Create a simulated PointerEvent
-         var pointerEvent = {
-             "pointerId": touch.identifier,
-             "pageX": touch.pageX,
-             "pageY": touch.pageY,
-             "screenX": touch.screenX,
-             "screenY": touch.screenY,
-             "width": touch.radiusX * 2, // Simulate width/height
-             "height": touch.radiusY * 2,
-             "pointerType": touch.pointerType,
-             "type": "pointerdown",
-              "preventDefault": function() {} // Dummy function
-         };
+         var pointerDownEvent = new TouchEventSym("pointerdown", pointerEventData); // Reuse TouchEventSym structure
 
+         // Call the pointer handler with the simulated event
+         this._pointerHandler(this, pointerDownEvent);
 
-         // Directly call the pointer handler with the simulated event
-         this._pointerHandler(this, pointerEvent);
-
-         // Simulate a pointerup after a short delay
+         // Simulate a pointerup after a short delay to represent a click releasing
          var self = this;
          setTimeout(function() {
-              var pointerUpEvent = {
-                  "pointerId": touch.identifier,
-                  "type": "pointerup",
-                   "preventDefault": function() {} // Dummy function
+              var pointerUpEventData = {
+                  "identifier": pointerDownEvent.pointerId, // Use the same ID
+                  "pageX" : event.pageX, // Use same position as up happens at click location
+                  "pageY" : event.pageY,
+                   "screenX" : event.screenX,
+                  "screenY" : event.screenY,
+                   "clientX" : event.clientX,
+                   "clientY" : event.clientY,
+                   "pointerType": "mouse",
+                   "button": 0,
+                   "buttons": 0 // No buttons pressed
               };
+              var pointerUpEvent = new TouchEventSym("pointerup", pointerUpEventData);
               self._pointerHandler(self, pointerUpEvent);
-         }, 50); // Simulate a quick tap
+         }, 50); // Simulate a quick tap release
     }
 
      function Wbbmtt__keydownHandler(orgThis, event) {
@@ -579,9 +655,13 @@
     }
 
     function Wbbmtt__clearTouches() {
-        this._activePointers.clear(); // Clear the Map
-        this._drawTouches();
-        console.log("Touches cleared by shake.");
+        if (this._activePointers.size > 0) {
+             this._activePointers.clear(); // Clear the Map
+             this._drawTouches();
+             console.log("Touches cleared by shake.");
+        } else {
+             console.log("No touches to clear.");
+        }
     }
 
     function Wbbmtt_start() {
@@ -589,16 +669,23 @@
         if (this.touchListenElementId) {
             listenElement = document.getElementById(this.touchListenElementId);
             if (!listenElement) {
-                console.error("Listen element not found. id='" + this.touchListenElementId + "'");
+                console.error("Listen element not found. id='" + this.touchListenElementId + "'. WBBMTT will not start event listeners.");
+                // Still proceed with drawing idle message etc. but skip listeners
+                 this._drawTouches();
                 return; // Exit if listen element not found
             }
         } else {
              listenElement = document.body; // Default to body if no specific element
+             // Ensure body has position: relative or similar if we attach to it
+             if (IN_BROWSER && document.body && !document.body.style.position) {
+                  document.body.style.position = 'relative';
+             }
         }
 
-        // Apply touch-action: none to the listen element to disable default gestures
+        // Apply touch-action: none to the listen element to disable default gestures [5, 8, 18]
          if (listenElement.style) {
-              listenElement.style.touchAction = "none"; // Disable default touch actions [5, 8, 18]
+              listenElement.style.touchAction = "none"; // Disable default touch actions
+              listenElement.style.MsTouchAction = "none"; // For older IE/Edge
          } else {
               console.warn("Listen element does not have a style property to set touch-action.");
          }
@@ -607,21 +694,25 @@
         // Use methodAdapter for all event listeners
         this._pointerHandlerFunc = this._pointerHandlerFunc || methodAdapter(this, this._pointerHandler);
 
-        // Add Pointer Event listeners
+        // Add Pointer Event listeners [3, 4, 5]
         listenElement.addEventListener("pointerdown", this._pointerHandlerFunc, false);
         listenElement.addEventListener("pointermove", this._pointerHandlerFunc, false);
         listenElement.addEventListener("pointerup", this._pointerHandlerFunc, false);
         listenElement.addEventListener("pointercancel", this._pointerHandlerFunc, false);
-        // pointerenter, pointerleave, pointerover, pointerout could be added if needed
+        // Optional: Add pointerleave and pointerout if needed for edge cases [5, 7]
+        // listenElement.addEventListener("pointerleave", this._pointerHandlerFunc, false);
+        // listenElement.addEventListener("pointerout", this._pointerHandlerFunc, false);
+
 
         if (this.useShakeOperation) {
             this._devicemotionHandlerFunc = this._devicemotionHandlerFunc
                     || methodAdapter(this, this._devicemotionHandler);
             // Check if devicemotion is supported
-            if (window.DeviceMotionEvent) {
+            if (IN_BROWSER && window.DeviceMotionEvent) {
                  window.addEventListener("devicemotion", this._devicemotionHandlerFunc);
+                 console.log("DeviceMotionEvent listening enabled for shake clear.");
             } else {
-                 console.warn("DeviceMotionEvent is not supported on this device.");
+                 console.warn("DeviceMotionEvent is not supported on this device or IN_BROWSER is false. Shake clear disabled.");
                  this.useShakeOperation = false; // Disable shake if not supported
             }
         }
@@ -636,10 +727,13 @@
         if (this.backGroundColor) {
             // overwrite body background dynamically for smooth transition when device orientation
             // is changed
-            document.body.style.background = this.backGroundColor;
+            if (IN_BROWSER && document.body) {
+                 document.body.style.background = this.backGroundColor;
+            }
         }
 
         if (PC_DEBUG) {
+            console.log("PC_DEBUG is enabled. Click and keydown handlers are active.");
             this._clickHandlerFunc = this._clickHandlerFunc
                     || methodAdapter(this, this._clickHandler);
             document.addEventListener("click", this._clickHandlerFunc, false);
@@ -649,11 +743,15 @@
 
             // Add debug key functions
              this.keyFuncMap['c'] = this._clearTouches; // 'c' key to clear touches
+             console.log("Press 'c' to clear touches (PC_DEBUG only).");
         }
 
         console.log("WBBMTT started. Listening for pointer events on #" + listenElement.id + ".");
         if (this.manualClearMode) {
              console.log("Manual clear mode (shake) is enabled.");
+        }
+        if (this.logPointerEvents) {
+             console.log("Pointer event logging is enabled.");
         }
     }
 
@@ -663,6 +761,8 @@
             window.addEventListener("load", function() {
                 self.start();
             }, false);
+        } else {
+             console.warn("Not in a browser environment. WBBMTT will not start.");
         }
     }
 
@@ -677,17 +777,26 @@
 // Optional: Auto-start the application if included as a script
 (function() {
     "use strict";
-    if (typeof Wbbmtt !== 'undefined') {
-        var app = new Wbbmtt();
-        app.startAfterLoad();
-         // Initialize Divlog if not already done and if console logging is desired
+    // Check if running in a browser and if Wbbmtt is defined
+    if (typeof window !== 'undefined' && typeof Wbbmtt !== 'undefined') {
+         // Initialize Divlog first if not already done and if console logging is desired
          if (typeof Divlog !== 'undefined' && typeof console !== 'undefined') {
              // Check if console.log has been overridden by Divlog already
-             if (console.log && console.log.toString().indexOf("self.log(s)") === -1) {
-                  new Divlog("Divlog_div", true);
+             if (!console._divlogActive) { // Use a flag to check if Divlog is active
+                  var divlog = new Divlog("Divlog_div", true);
+                  console._divlogActive = true; // Set flag
              }
+         } else if (typeof window !== 'undefined' && typeof console === 'undefined') {
+              // Basic console fallback if console is not available at all
+              window.console = { log: function() {}, warn: function() {}, error: function() {} };
          }
+
+        var app = new Wbbmtt();
+        app.startAfterLoad();
     } else {
-         console.error("Wbbmtt class not found.");
+         // Log message if not in a browser or Wbbmtt is not defined
+         if (typeof console !== 'undefined') {
+              console.error("Wbbmtt class not found or not running in a browser environment.");
+         }
     }
 })();
